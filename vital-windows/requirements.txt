@@ -1,0 +1,10 @@
+PyQt6>=6.6.0
+pandas>=2.0.0
+matplotlib>=3.8.0
+numpy>=1.26.0
+scipy>=1.11.0
+openpyxl>=3.1.0
+reportlab>=4.0.0
+qdarkstyle>=3.2.0
+darkdetect>=0.8.0
+pyinstaller>=6.0.0
