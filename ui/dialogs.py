@@ -1,7 +1,7 @@
 # ui/dialogs.py
 from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QFormLayout, QLineEdit,
                               QComboBox, QPushButton, QHBoxLayout, QMessageBox,
-                              QLabel, QSizePolicy)
+                              QLabel, QSizePolicy, QFileDialog)
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont
 
@@ -158,24 +158,67 @@ class ConfigDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Configuración de Empresa")
+        self.setMinimumWidth(400)
         self.setup_ui()
+        self.load_data()
 
     def setup_ui(self):
+        from app.config import COLORS, BTN_PRIMARY
         layout = QVBoxLayout(self)
         form = QFormLayout()
 
-        self.empresa = QLineEdit("Mi Granja S.A.")
-        self.tecnico = QLineEdit("Técnico Principal")
+        self.empresa = QLineEdit()
+        self.tecnico = QLineEdit()
+        
+        self.logo_layout = QHBoxLayout()
+        self.inp_logo = QLineEdit()
+        self.inp_logo.setReadOnly(True)
+        self.btn_logo = QPushButton("📁")
+        self.btn_logo.setFixedWidth(40)
+        self.btn_logo.clicked.connect(self.seleccionar_logo)
+        self.logo_layout.addWidget(self.inp_logo)
+        self.logo_layout.addWidget(self.btn_logo)
+
         self.moneda = QComboBox()
-        self.moneda.addItems(["$", "Bs.", "S/.", "€"])
+        self.moneda.addItems(["$", "Bs.", "S/.", "€", "COP", "MXN"])
 
         form.addRow("Nombre de la empresa:", self.empresa)
         form.addRow("Técnico Responsable:", self.tecnico)
-        form.addRow("Moneda:", self.moneda)
+        form.addRow("Logo de la empresa:", self.logo_layout)
+        form.addRow("Moneda Principal:", self.moneda)
         layout.addLayout(form)
 
         btn_box = QHBoxLayout()
-        btn_guardar = QPushButton("Guardar")
-        btn_guardar.clicked.connect(self.accept)
+        btn_guardar = QPushButton("💾 Guardar Configuración")
+        btn_guardar.setStyleSheet(BTN_PRIMARY)
+        btn_guardar.clicked.connect(self.guardar_data)
+        btn_box.addStretch()
         btn_box.addWidget(btn_guardar)
         layout.addLayout(btn_box)
+
+    def seleccionar_logo(self):
+        ruta, _ = QFileDialog.getOpenFileName(self, "Seleccionar Logo", "", "Imágenes (*.png *.jpg *.jpeg)")
+        if ruta:
+            self.inp_logo.setText(ruta)
+
+    def load_data(self):
+        from app.database import get_config_empresa
+        self.empresa.setText(get_config_empresa('nombre_empresa', 'Mi Granja S.A.'))
+        self.tecnico.setText(get_config_empresa('tecnico', 'Técnico Principal'))
+        self.inp_logo.setText(get_config_empresa('logo_path', ''))
+        
+        moneda = get_config_empresa('moneda', '$')
+        idx = self.moneda.findText(moneda)
+        if idx >= 0:
+            self.moneda.setCurrentIndex(idx)
+        else:
+            self.moneda.setEditText(moneda)
+
+    def guardar_data(self):
+        from app.database import set_config_empresa
+        set_config_empresa('nombre_empresa', self.empresa.text().strip())
+        set_config_empresa('tecnico', self.tecnico.text().strip())
+        set_config_empresa('logo_path', self.inp_logo.text().strip())
+        set_config_empresa('moneda', self.moneda.currentText().strip())
+        QMessageBox.information(self, "Éxito", "Configuración guardada correctamente. Reinicie la aplicación si la moneda no se actualiza en todas las vistas.")
+        self.accept()

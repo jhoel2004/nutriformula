@@ -4,7 +4,7 @@ echo   Construyendo VITAL para Windows
 echo ========================================
 
 :: Instalar dependencias necesarias
-pip install pyinstaller qdarkstyle pandas darkdetect openpyxl PyQt6
+pip install -r requirements.txt
 
 :: Ejecutar PyInstaller usando el archivo .spec
 pyinstaller --clean VITAL.spec

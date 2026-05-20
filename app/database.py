@@ -2,9 +2,9 @@ import sqlite3
 import os
 import json
 
-from app.utils import resource_path
+from app.utils import get_db_path
 
-DB_PATH = resource_path(os.path.join('data', 'nutriformula.db'))
+DB_PATH = str(get_db_path())
 
 def get_connection():
     """Obtiene una conexión a la base de datos SQLite."""
@@ -109,6 +109,34 @@ def init_db():
                                  lisina, metionina, colina_mgr, precio_kg, categoria, especies_compatibles)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '["Todos"]')
             ''', insumos_default)
+
+        # ── Insumos adicionales v2 (idempotente) ────────────────────
+        insumos_v2 = [
+            ('carbonato de calcio',   0.0,  0,    0.0, 0.0,  38.0, 0.0,  0.0, 0.0,   0,   0.0, 'Minerales'),
+            ('fosfato bicálcico',     0.0,  0,    0.0, 0.0,  22.0, 18.0, 0.0, 0.0,   0,   0.0, 'Minerales'),
+            ('sal común (NaCl)',      0.0,  0,    0.0, 0.0,  0.0,  0.0,  0.0, 0.0,   0,   0.0, 'Minerales'),
+            ('bicarbonato de sodio',  0.0,  0,    0.0, 0.0,  0.0,  0.0,  0.0, 0.0,   0,   0.0, 'Minerales'),
+            ('premezcla vitamínica aves', 12.0, 0, 0.0, 0.0, 3.5, 2.0,  0.5, 0.3, 2500, 0.0, 'Premezclas'),
+            ('premezcla vitamínica porcinos',10.0,0,0.0,0.0, 2.0, 1.5,  0.4, 0.2, 2000, 0.0, 'Premezclas'),
+            ('lisina sintética L-Lys', 78.0, 0,  0.0, 0.0,  0.0,  0.0,  78.0,0.0,   0,   0.0, 'Aminoácidos'),
+            ('DL-metionina',           58.0, 0,  0.0, 0.0,  0.0,  0.0,  0.0, 99.0,  0,   0.0, 'Aminoácidos'),
+            ('aceite de palma',         0.0, 8000,0.0,80.0, 0.0,  0.0,  0.0, 0.0,   0,   0.0, 'Grasas'),
+            ('aceite de soya',          0.0, 8000,0.0,80.0, 0.0,  0.0,  0.0, 0.0,   0,   0.0, 'Grasas'),
+            ('harina de sangre',       80.0, 2900,1.0, 1.5, 0.3,  0.25, 7.0, 1.2,  800,  0.0, 'Proteínas'),
+            ('harina de plumas',       85.0, 2850,2.0, 3.5, 0.4,  0.50, 1.8, 0.6,  500,  0.0, 'Proteínas'),
+            ('gluten de maíz',         60.0, 3600,2.0, 4.5, 0.05, 0.5,  1.2, 2.0,  600,  0.0, 'Proteínas'),
+            ('cebada grano',           11.5, 2650,5.5, 2.1, 0.06, 0.38, 0.43,0.18, 1050, 0.0, 'Cereales'),
+            ('trigo grano',            12.5, 3200,3.0, 1.9, 0.07, 0.38, 0.35,0.22,  950, 0.0, 'Cereales'),
+        ]
+        for ins in insumos_v2:
+            try:
+                cursor.execute('''
+                INSERT OR IGNORE INTO insumos (nombre, proteina, em_kcal, fibra, grasa, calcio, fosforo,
+                                     lisina, metionina, colina_mgr, precio_kg, categoria, especies_compatibles)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '["Todos"]')
+                ''', ins)
+            except Exception:
+                pass
 
         conn.commit()
     except sqlite3.Error as e:
@@ -309,14 +337,240 @@ def migrar_base_de_datos():
 
             CREATE INDEX IF NOT EXISTS idx_formulaciones_animal ON formulaciones(animal_id);
             CREATE INDEX IF NOT EXISTS idx_form_ingr_form       ON formulacion_ingredientes(formulacion_id);
+
+            -- ══ Tablas v2.0 ══════════════════════════════════════════
+            CREATE TABLE IF NOT EXISTS config_empresa (
+                clave  TEXT PRIMARY KEY,
+                valor  TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS lotes (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                formulacion_id  INTEGER REFERENCES formulaciones(id) ON DELETE SET NULL,
+                nombre          TEXT NOT NULL,
+                fecha           TEXT NOT NULL,
+                cantidad_kg     REAL DEFAULT 0,
+                costo_total     REAL DEFAULT 0,
+                notas           TEXT DEFAULT '',
+                estado          TEXT DEFAULT 'producido'
+            );
+
+            CREATE TABLE IF NOT EXISTS historial_precios (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                insumo_id   INTEGER NOT NULL REFERENCES insumos(id) ON DELETE CASCADE,
+                precio_kg   REAL NOT NULL,
+                fecha       TEXT NOT NULL,
+                proveedor   TEXT DEFAULT ''
+            );
+
+            CREATE TABLE IF NOT EXISTS alertas_log (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                tipo            TEXT NOT NULL,
+                mensaje         TEXT NOT NULL,
+                formulacion_id  INTEGER,
+                fecha           TEXT NOT NULL,
+                leida           INTEGER DEFAULT 0
+            );
         """)
 
+        # 2) Migraciones de columnas v2 (idempotente)
+        migraciones_v2 = [
+            "ALTER TABLE animales ADD COLUMN icono TEXT DEFAULT '🐾'",
+            "ALTER TABLE insumos ADD COLUMN precio_kg_anterior REAL DEFAULT 0",
+            "ALTER TABLE insumos ADD COLUMN stock_kg REAL DEFAULT 0",
+            "ALTER TABLE insumos ADD COLUMN proveedor TEXT DEFAULT ''",
+            "ALTER TABLE insumos ADD COLUMN notas TEXT DEFAULT ''",
+            "ALTER TABLE insumos ADD COLUMN tms REAL DEFAULT 0",
+            "ALTER TABLE formulaciones ADD COLUMN version INTEGER DEFAULT 1",
+            "ALTER TABLE formulaciones ADD COLUMN etiqueta TEXT DEFAULT ''",
+            "ALTER TABLE formulaciones ADD COLUMN aprobada INTEGER DEFAULT 0",
+        ]
+        for sql in migraciones_v2:
+            try:
+                cursor.execute(sql)
+            except Exception:
+                pass  # columna ya existe
+
         conn.commit()
-        print("✓ Migración BD completada")
+        print("✓ Migración BD v2 completada")
     except sqlite3.Error as e:
         print(f"Error en migración: {e}")
     finally:
-        conn.close()# ══════════════════════════════════════════════════════════════════════
+        conn.close()
+
+# ══════════════════════════════════════════════════════════════════════
+# CRUD — Inventario / Stock / Alertas (v2.0)
+# ══════════════════════════════════════════════════════════════════════
+def actualizar_stock(insumo_id, cantidad_entrada, precio_kg, proveedor=''):
+    """Actualiza stock de un insumo y registra en historial de precios."""
+    from datetime import datetime
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        # Leer precio anterior
+        cursor.execute('SELECT precio_kg FROM insumos WHERE id=?', (insumo_id,))
+        row = cursor.fetchone()
+        precio_anterior = row[0] if row else 0
+        # Actualizar insumo
+        cursor.execute('''UPDATE insumos SET stock_kg = stock_kg + ?,
+                          precio_kg_anterior = precio_kg, precio_kg = ?,
+                          proveedor = ? WHERE id = ?''',
+                       (cantidad_entrada, precio_kg, proveedor, insumo_id))
+        # Registrar en historial
+        cursor.execute('''INSERT INTO historial_precios (insumo_id, precio_kg, fecha, proveedor)
+                          VALUES (?, ?, ?, ?)''',
+                       (insumo_id, precio_kg, datetime.now().isoformat(), proveedor))
+        conn.commit()
+        return True
+    except sqlite3.Error as e:
+        print(f"Error actualizando stock: {e}")
+        return False
+    finally:
+        conn.close()
+
+def get_historial_precios(insumo_id):
+    try:
+        conn = get_connection()
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute('SELECT * FROM historial_precios WHERE insumo_id=? ORDER BY fecha', (insumo_id,))
+        return [dict(r) for r in cursor.fetchall()]
+    except sqlite3.Error:
+        return []
+    finally:
+        conn.close()
+
+def get_insumos_stock_critico(umbral=10.0):
+    try:
+        conn = get_connection()
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute('SELECT * FROM insumos WHERE activo=1 AND stock_kg <= ? AND stock_kg > 0 ORDER BY stock_kg', (umbral,))
+        return [dict(r) for r in cursor.fetchall()]
+    except sqlite3.Error:
+        return []
+    finally:
+        conn.close()
+
+# ══════════════════════════════════════════════════════════════════════
+# CRUD — Lotes de producción (v2.0)
+# ══════════════════════════════════════════════════════════════════════
+def insertar_lote(datos):
+    from datetime import datetime
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute('''INSERT INTO lotes (formulacion_id, nombre, fecha, cantidad_kg, costo_total, notas, estado)
+                          VALUES (?, ?, ?, ?, ?, ?, ?)''',
+                       (datos.get('formulacion_id'), datos['nombre'],
+                        datos.get('fecha', datetime.now().isoformat()),
+                        datos.get('cantidad_kg', 0), datos.get('costo_total', 0),
+                        datos.get('notas', ''), datos.get('estado', 'producido')))
+        conn.commit()
+        return cursor.lastrowid
+    except sqlite3.Error as e:
+        print(f"Error insertando lote: {e}")
+        return None
+    finally:
+        conn.close()
+
+def listar_lotes(estado=None):
+    try:
+        conn = get_connection()
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        sql = '''SELECT l.*, f.nombre as formulacion_nombre, a.nombre as animal_nombre
+                 FROM lotes l
+                 LEFT JOIN formulaciones f ON l.formulacion_id = f.id
+                 LEFT JOIN animales a ON f.animal_id = a.id WHERE 1=1'''
+        params = []
+        if estado:
+            sql += ' AND l.estado=?'
+            params.append(estado)
+        sql += ' ORDER BY l.fecha DESC'
+        cursor.execute(sql, params)
+        return [dict(r) for r in cursor.fetchall()]
+    except sqlite3.Error:
+        return []
+    finally:
+        conn.close()
+
+def actualizar_estado_lote(lote_id, estado):
+    try:
+        conn = get_connection()
+        conn.execute('UPDATE lotes SET estado=? WHERE id=?', (estado, lote_id))
+        conn.commit()
+        return True
+    except sqlite3.Error:
+        return False
+    finally:
+        conn.close()
+
+# ══════════════════════════════════════════════════════════════════════
+# CRUD — Alertas (v2.0)
+# ══════════════════════════════════════════════════════════════════════
+def insertar_alerta(tipo, mensaje, formulacion_id=None):
+    from datetime import datetime
+    try:
+        conn = get_connection()
+        conn.execute('''INSERT INTO alertas_log (tipo, mensaje, formulacion_id, fecha)
+                        VALUES (?, ?, ?, ?)''',
+                     (tipo, mensaje, formulacion_id, datetime.now().isoformat()))
+        conn.commit()
+    except sqlite3.Error:
+        pass
+    finally:
+        conn.close()
+
+def obtener_alertas_no_leidas():
+    try:
+        conn = get_connection()
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute('SELECT * FROM alertas_log WHERE leida=0 ORDER BY fecha DESC')
+        return [dict(r) for r in cursor.fetchall()]
+    except sqlite3.Error:
+        return []
+    finally:
+        conn.close()
+
+def marcar_alerta_leida(alerta_id):
+    try:
+        conn = get_connection()
+        conn.execute('UPDATE alertas_log SET leida=1 WHERE id=?', (alerta_id,))
+        conn.commit()
+    except sqlite3.Error:
+        pass
+    finally:
+        conn.close()
+
+# ══════════════════════════════════════════════════════════════════════
+# CRUD — Config empresa (v2.0)
+# ══════════════════════════════════════════════════════════════════════
+def get_config_empresa(clave, default=''):
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute('SELECT valor FROM config_empresa WHERE clave=?', (clave,))
+        row = cursor.fetchone()
+        return row[0] if row else default
+    except sqlite3.Error:
+        return default
+    finally:
+        conn.close()
+
+def set_config_empresa(clave, valor):
+    try:
+        conn = get_connection()
+        conn.execute('INSERT OR REPLACE INTO config_empresa (clave, valor) VALUES (?, ?)', (clave, str(valor)))
+        conn.commit()
+    except sqlite3.Error:
+        pass
+    finally:
+        conn.close()
+
+
+# ══════════════════════════════════════════════════════════════════════
 # GestorFormulacionesBD — Persistencia completa en SQLite
 # ══════════════════════════════════════════════════════════════════════
 class GestorFormulacionesBD:

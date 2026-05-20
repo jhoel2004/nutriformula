@@ -10,8 +10,13 @@ from ui.tab_ingredientes import TabIngredientes
 from ui.tab_calcular import TabCalcular
 from ui.tab_formulaciones import TabFormulaciones
 from ui.tab_graficas import TabGraficas
+from ui.tab_inventario import TabInventario
+from ui.tab_economia import TabEconomia
+from ui.tab_lotes import TabLotes
+from ui.panel_alertas import PanelAlertas
 from ui.dialogs import ConfigDialog
 from app.utils import resource_path
+from app.database import GestorFormulacionesBD
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -22,6 +27,10 @@ class MainWindow(QMainWindow):
         self._formulacion_nombre = "Nueva Ración"
 
         self.setup_ui()
+        self.verificar_alertas_al_iniciar()
+
+    def verificar_alertas_al_iniciar(self):
+        self.panel_alertas.load_alertas()
 
     # ================================================================
     # UI principal
@@ -76,6 +85,11 @@ class MainWindow(QMainWindow):
         self.btn_toggle.setStyleSheet("font-size: 18px; padding: 20px 22px; color: #4ECCA3;")
         sidebar_layout.addWidget(self.btn_toggle)
 
+        self.btn_alertas = QPushButton("  🔔")
+        self.btn_alertas.setToolTip("Centro de Alertas")
+        self.btn_alertas.clicked.connect(self._toggle_alertas)
+        sidebar_layout.addWidget(self.btn_alertas)
+        
         sidebar_layout.addSpacing(10)
 
         # Botones de navegación con nuevos iconos
@@ -85,6 +99,12 @@ class MainWindow(QMainWindow):
         self.btn_ing.setChecked(True)
         self.btn_ing.clicked.connect(lambda: self._cambiar_pantalla(0, self.btn_ing))
         sidebar_layout.addWidget(self.btn_ing)
+
+        self.btn_inventario = QPushButton("  📋")
+        self.btn_inventario.setToolTip("Inventario y Stock")
+        self.btn_inventario.setCheckable(True)
+        self.btn_inventario.clicked.connect(lambda: self._cambiar_pantalla(4, self.btn_inventario))
+        sidebar_layout.addWidget(self.btn_inventario)
 
         self.btn_form = QPushButton("  🧪")
         self.btn_form.setToolTip("Formulación de Raciones")
@@ -98,13 +118,25 @@ class MainWindow(QMainWindow):
         self.btn_graficas.clicked.connect(lambda: self._cambiar_pantalla(2, self.btn_graficas))
         sidebar_layout.addWidget(self.btn_graficas)
 
+        self.btn_economia = QPushButton("  💰")
+        self.btn_economia.setToolTip("Análisis Económico")
+        self.btn_economia.setCheckable(True)
+        self.btn_economia.clicked.connect(lambda: self._cambiar_pantalla(5, self.btn_economia))
+        sidebar_layout.addWidget(self.btn_economia)
+
+        self.btn_lotes = QPushButton("  🏭")
+        self.btn_lotes.setToolTip("Lotes de Producción")
+        self.btn_lotes.setCheckable(True)
+        self.btn_lotes.clicked.connect(lambda: self._cambiar_pantalla(6, self.btn_lotes))
+        sidebar_layout.addWidget(self.btn_lotes)
+
         self.btn_anim = QPushButton("  💾")
         self.btn_anim.setToolTip("Historial de Fórmulas")
         self.btn_anim.setCheckable(True)
         self.btn_anim.clicked.connect(lambda: self._cambiar_pantalla(3, self.btn_anim))
         sidebar_layout.addWidget(self.btn_anim)
 
-        self.nav_buttons = [self.btn_ing, self.btn_form, self.btn_graficas, self.btn_anim]
+        self.nav_buttons = [self.btn_ing, self.btn_form, self.btn_graficas, self.btn_anim, self.btn_inventario, self.btn_economia, self.btn_lotes]
 
         sidebar_layout.addStretch()
         
@@ -117,13 +149,25 @@ class MainWindow(QMainWindow):
         self.tab_calcular = TabCalcular()
         self.tab_graficas = TabGraficas()
         self.tab_formulaciones = TabFormulaciones()
+        self.tab_inventario = TabInventario()
+        self.tab_economia = TabEconomia()
+        self.tab_lotes = TabLotes()
 
         self.stacked_widget.addWidget(self.tab_ingredientes)     # index 0
         self.stacked_widget.addWidget(self.tab_calcular)         # index 1
         self.stacked_widget.addWidget(self.tab_graficas)         # index 2
         self.stacked_widget.addWidget(self.tab_formulaciones)    # index 3
+        self.stacked_widget.addWidget(self.tab_inventario)       # index 4
+        self.stacked_widget.addWidget(self.tab_economia)         # index 5
+        self.stacked_widget.addWidget(self.tab_lotes)            # index 6
 
         main_layout.addWidget(self.stacked_widget, 1)
+        
+        # ── Panel de Alertas ──────────────────────────────────────────
+        self.panel_alertas = PanelAlertas()
+        self.panel_alertas.hide()
+        self.panel_alertas.alertas_cambiadas.connect(self.actualizar_badge_alertas)
+        main_layout.addWidget(self.panel_alertas)
 
         # Cargar insumos
         self.tab_calcular.pagina_formular.load_insumos()
@@ -188,17 +232,51 @@ class MainWindow(QMainWindow):
         self.sidebar.setFixedWidth(200)
         self.btn_toggle.setText("  ☰  Menú")
         self.btn_ing.setText("  📦  Insumos")
+        self.btn_inventario.setText("  📋  Inventario")
         self.btn_form.setText("  🧪  Formular")
         self.btn_graficas.setText("  📈  Gráficas")
+        self.btn_economia.setText("  💰  Economía")
+        self.btn_lotes.setText("  🏭  Lotes")
         self.btn_anim.setText("  💾  Historial")
+        
+        # Update alertas text based on current badge
+        if "Alertas" not in self.btn_alertas.text():
+            txt = self.btn_alertas.text().replace("  🔔", "  🔔  Alertas")
+            self.btn_alertas.setText(txt)
 
     def _collapse_sidebar(self):
         self.sidebar.setFixedWidth(65)
         self.btn_toggle.setText("  ☰")
         self.btn_ing.setText("  📦")
+        self.btn_inventario.setText("  📋")
         self.btn_form.setText("  🧪")
         self.btn_graficas.setText("  📈")
+        self.btn_economia.setText("  💰")
+        self.btn_lotes.setText("  🏭")
         self.btn_anim.setText("  💾")
+        
+        # Update alertas text based on current badge
+        txt = self.btn_alertas.text().replace("  Alertas", "")
+        self.btn_alertas.setText(txt)
+
+    def _toggle_alertas(self):
+        if self.panel_alertas.isHidden():
+            self.panel_alertas.show()
+            self.panel_alertas.load_alertas()
+        else:
+            self.panel_alertas.hide()
+
+    def actualizar_badge_alertas(self, num):
+        if self.sidebar.width() == 200:
+            txt = f"  🔔  Alertas ({num})" if num > 0 else "  🔔  Alertas"
+        else:
+            txt = f"  🔔({num})" if num > 0 else "  🔔"
+            
+        self.btn_alertas.setText(txt)
+        if num > 0:
+            self.btn_alertas.setStyleSheet("color: #FF5A5F; font-weight: bold; background: transparent; padding: 15px 22px; text-align: left; font-size: 14px; border: none;")
+        else:
+            self.btn_alertas.setStyleSheet("color: #A0A0B8; background: transparent; padding: 15px 22px; text-align: left; font-size: 14px; border: none; border-left: 3px solid transparent;")
 
     def _toggle_sidebar(self):
         # Mantenemos por compatibilidad, pero ahora es automático
@@ -213,9 +291,15 @@ class MainWindow(QMainWindow):
             btn.setChecked(btn == boton_presionado)
         if index == 1:
             self.tab_calcular.pagina_formular.reload_animales()
-        if index == 3:
+        elif index == 3:
             self.tab_formulaciones.load_formulaciones()
             self.tab_formulaciones.load_animales()
+        elif index == 4:
+            self.tab_inventario.load_data()
+        elif index == 5:
+            self.tab_economia.load_data()
+        elif index == 6:
+            self.tab_lotes.load_data()
 
     # ================================================================
     # Carga de Formulación BD
